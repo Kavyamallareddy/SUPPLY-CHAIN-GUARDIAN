@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Supply-Chain Guardian</title>
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script>
+  tailwind.config = { theme: { extend: {
+    fontFamily: { mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Consolas', 'monospace'] },
+    colors: { ink: { 950: '#07090d', 900: '#0b0f16', 850: '#10151f', 800: '#151b27', 700: '#1f2735', 600: '#2b3547' } }
+  } } };
+</script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: #07090d; }
+  .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #2b3547; border-radius: 4px; }
+  pre code.hljs { background: transparent; padding: 0; }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  .tab-active { color: #e2e8f0; border-color: #ef4444; }
+  #cy { background-image: radial-gradient(#1f2735 1px, transparent 1px); background-size: 22px 22px; }
+  .spin { animation: spin 1s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body class="h-full text-slate-300 font-sans antialiased">
+<div class="flex flex-col min-h-full">
+
+  <!-- Top control bar -->
+  <header class="border-b border-ink-700 bg-ink-900/95 sticky top-0 z-20 backdrop-blur">
+    <div class="px-4 py-3 flex flex-wrap items-center gap-3">
+      <div class="flex items-center gap-2 mr-2">
+        <svg viewBox="0 0 24 24" class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+        <div>
+          <div class="text-sm font-semibold text-slate-100 tracking-wide">SUPPLY-CHAIN GUARDIAN</div>
+          <div class="text-[10px] uppercase tracking-widest text-slate-500">read-only &middot; attack-tree elo</div>
+        </div>
+      </div>
+      <label class="flex items-center gap-2 text-xs flex-1 min-w-[220px]">
+        <span class="text-slate-500 uppercase tracking-wider">Repo</span>
+        <input id="repo" class="flex-1 bg-ink-850 border border-ink-600 rounded px-2 py-1.5 font-mono text-xs text-slate-200 focus:outline-none focus:border-red-500" value="/tmp/juice-shop">
+      </label>
+      <form id="gateForm" class="flex items-center gap-1">
+        <input id="pkg" class="w-44 bg-ink-850 border border-ink-600 rounded-l px-2 py-1.5 font-mono text-xs text-slate-200 focus:outline-none focus:border-amber-500" placeholder="reqeusts@1.0.0" value="reqeusts@1.0.0">
+        <button class="btn bg-amber-600 hover:bg-amber-500 text-ink-950 rounded-r px-3 py-1.5 text-xs font-semibold" type="submit">Check Before Install</button>
+      </form>
+      <div class="flex flex-wrap gap-2">
+        <button data-act="scan" class="btn bg-ink-700 hover:bg-ink-600 border border-ink-600 rounded px-3 py-1.5 text-xs font-medium text-slate-100">Full Scan</button>
+        <button data-act="replay" class="btn bg-ink-700 hover:bg-ink-600 border border-ink-600 rounded px-3 py-1.5 text-xs font-medium text-slate-100">Replay 5 Commits</button>
+        <button data-act="simulate" class="btn bg-red-600 hover:bg-red-500 rounded px-3 py-1.5 text-xs font-semibold text-white">Simulate Live Attack</button>
+        <button data-act="daemon" id="daemonBtn" class="btn bg-ink-700 hover:bg-ink-600 border border-ink-600 rounded px-3 py-1.5 text-xs font-medium text-slate-100 flex items-center gap-2">
+          <span id="daemonDot" class="w-2 h-2 rounded-full bg-slate-500"></span><span>Toggle Drift Watchdog</span>
+        </button>
+        <label class="flex items-center gap-1 text-[11px] text-slate-500" title="Inject one clearly-labelled synthetic advisory on the 2nd poll"><input id="demoDrift" type="checkbox" class="accent-red-500">demo drift</label>
+      </div>
+      <div id="busy" class="hidden items-center gap-2 text-xs text-slate-400"><span class="w-3 h-3 border-2 border-slate-500 border-t-red-500 rounded-full spin"></span><span id="busyText">working</span></div>
+      <span id="llmBadge" class="ml-auto text-[10px] font-mono px-2 py-1 rounded border border-ink-600 text-slate-400">LLM: ...</span>
+    </div>
+  </header>
+
+  <!-- KPI strip -->
+  <section class="px-4 pt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <div class="rounded-lg bg-ink-900 border border-ink-700 p-3"><div class="text-[10px] uppercase tracking-widest text-slate-500">Total Components</div><div id="kTotal" class="text-2xl font-semibold font-mono text-slate-100">&ndash;</div><div id="kSrc" class="text-[10px] text-slate-500 font-mono truncate">no scan yet</div></div>
+    <div class="rounded-lg bg-ink-900 border border-ink-700 p-3"><div class="text-[10px] uppercase tracking-widest text-slate-500">Raw Scanner Alerts</div><div id="kRaw" class="text-2xl font-semibold font-mono text-amber-300">&ndash;</div><div class="text-[10px] text-slate-500">advisories + scored static anomalies</div></div>
+    <div class="rounded-lg bg-ink-900 border border-red-900/60 p-3"><div class="text-[10px] uppercase tracking-widest text-red-400">Actionable Critical Risks</div><div id="kCrit" class="text-2xl font-semibold font-mono text-red-400">&ndash;</div><div class="text-[10px] text-slate-500">Risk Elo &ge; 1800</div></div>
+    <div class="rounded-lg bg-ink-900 border border-emerald-900/60 p-3"><div class="text-[10px] uppercase tracking-widest text-emerald-400">Downgraded Noise</div><div id="kNoise" class="text-2xl font-semibold font-mono text-emerald-400">&ndash;</div><div class="text-[10px] text-slate-500">Risk Elo &lt; 1000</div></div>
+  </section>
+  <div id="notes" class="px-4 pt-2 space-y-1"></div>
+
+  <!-- Main -->
+  <main class="flex-1 p-4 grid grid-cols-1 xl:grid-cols-12 gap-4 min-h-[640px]">
+    <section class="xl:col-span-7 rounded-lg bg-ink-900 border border-ink-700 flex flex-col overflow-hidden min-h-[480px]">
+      <div class="flex flex-wrap items-center gap-3 px-3 py-2 border-b border-ink-700 text-xs">
+        <div id="viewToggle" class="flex rounded border border-ink-600 overflow-hidden" title="Attack paths = only risky routes; Dependencies = every discovered package">
+          <button data-view="attack" class="view-btn px-2.5 py-1 font-semibold bg-ink-700 text-slate-100">Attack paths</button>
+          <button data-view="deps" class="view-btn px-2.5 py-1 font-semibold text-slate-400 hover:text-slate-200">Dependencies</button>
+        </div>
+        <span id="graphMode" class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-ink-700 text-slate-400">repository</span>
+        <button id="backToRepo" class="hidden text-[11px] underline text-slate-400 hover:text-slate-200">back to repository graph</button>
+        <form id="findForm"><input id="findNode" maxlength="100" placeholder="find package…" class="w-32 bg-ink-850 border border-ink-600 rounded px-2 py-1 font-mono text-[11px] text-slate-200 focus:outline-none focus:border-red-500"></form>
+        <div class="ml-auto flex flex-wrap items-center gap-3 text-[10px] text-slate-500">
+          <span id="legendAttack" class="flex flex-wrap items-center gap-3">
+            <span class="flex items-center gap-1"><i class="w-2.5 h-2.5 rounded-sm bg-sky-500 inline-block"></i>Tier 0 exposure</span>
+            <span class="flex items-center gap-1"><i class="w-2.5 h-2.5 rounded-sm bg-violet-500 inline-block"></i>module</span>
+            <span class="flex items-center gap-1"><i class="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block"></i>package</span>
+            <span class="flex items-center gap-1"><i class="w-2.5 h-2.5 rotate-45 bg-red-500 inline-block"></i>threat leaf</span>
+          </span>
+          <span id="legendDeps" class="hidden flex-wrap items-center gap-3">
+            <span class="flex items-center gap-1"><i class="w-2.5 h-2.5 rounded-sm bg-sky-500 inline-block"></i>project</span>
+            <span class="flex items-center gap-1"><i class="w-2.5 h-2.5 rounded-full bg-slate-300 inline-block"></i>direct</span>
+            <span class="flex items-center gap-1"><i class="w-2 h-2 rounded-full bg-slate-500 inline-block"></i>transitive</span>
+            <span class="flex items-center gap-1"><i class="w-2.5 h-2.5 rounded-full border border-dashed border-amber-400 inline-block"></i>dev-only</span>
+            <span class="flex items-center gap-1"><i class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></i>has findings</span>
+            <span id="depCount" class="font-mono"></span>
+          </span>
+          <button id="fitBtn" class="underline hover:text-slate-300">fit</button>
+        </div>
+      </div>
+      <div class="relative flex-1">
+        <div id="cy" class="absolute inset-0"></div>
+        <div id="graphEmpty" class="absolute inset-0 flex items-center justify-center text-sm text-slate-500 pointer-events-none">Run a Full Scan to build the attack tree and dependency graph.</div>
+        <div id="nodeInfo" class="hidden absolute left-3 bottom-3 max-w-[70%] rounded-md bg-ink-850/95 border border-ink-600 p-2 text-[11px] font-mono text-slate-300"></div>
+      </div>
+    </section>
+
+    <section class="xl:col-span-5 rounded-lg bg-ink-900 border border-ink-700 flex flex-col overflow-hidden min-h-[480px]">
+      <nav class="flex border-b border-ink-700 text-xs">
+        <button data-tab="cards" class="tab tab-active px-4 py-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200">Evidence Cards <span id="cardCount" class="font-mono text-slate-500"></span></button>
+        <button data-tab="stream" class="tab px-4 py-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200">Orchestrator Stream <span id="streamDot" class="inline-block w-1.5 h-1.5 rounded-full bg-slate-600 align-middle"></span></button>
+        <button data-tab="chat" class="tab px-4 py-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200">Ask Orchestrator</button>
+      </nav>
+      <div id="tab-cards" class="tabpane flex-1 overflow-y-auto scroll-thin p-3 space-y-2">
+        <div id="filterBar" class="hidden text-[11px] text-slate-400 flex items-center gap-2">Filtered by node <code id="filterNode" class="text-slate-200"></code><button id="clearFilter" class="underline">clear</button></div>
+        <div id="extraPanel"></div>
+        <div id="cards" class="space-y-2"><p class="text-xs text-slate-500">No cards yet.</p></div>
+      </div>
+      <div id="tab-stream" class="tabpane hidden flex-1 overflow-y-auto scroll-thin p-2 font-mono text-[11px] leading-5" ></div>
+      <div id="tab-chat" class="tabpane hidden flex-1 flex flex-col overflow-hidden">
+        <div id="chatLog" class="flex-1 overflow-y-auto scroll-thin p-3 space-y-3 text-xs">
+          <div class="text-slate-500">Ask about a finding (<code>F-001</code>), a package (<code>jsonwebtoken</code>), "what is noise?", or "how is the Elo computed?". Answers cite only verified evidence.</div>
+        </div>
+        <form id="chatForm" class="border-t border-ink-700 p-2 flex gap-2">
+          <input id="chatInput" maxlength="2000" class="flex-1 bg-ink-850 border border-ink-600 rounded px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-red-500" placeholder="Why is F-001 critical?">
+          <button class="bg-ink-700 hover:bg-ink-600 border border-ink-600 rounded px-3 text-xs text-slate-100">Ask</button>
+        </form>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const SEV = {
+  CRITICAL: { bg: "bg-red-600/20", text: "text-red-300", border: "border-red-700", node: "#ef4444" },
+  HIGH: { bg: "bg-orange-500/20", text: "text-orange-300", border: "border-orange-700", node: "#f97316" },
+  MEDIUM: { bg: "bg-yellow-500/15", text: "text-yellow-300", border: "border-yellow-700", node: "#eab308" },
+  LOW: { bg: "bg-emerald-500/15", text: "text-emerald-300", border: "border-emerald-800", node: "#10b981" },
+};
+const state = { result: null, cards: [], filter: null, cy: null, view: "repo", busy: false, graphKind: "attack" };
+
+// ---------- API helpers ----------
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : r.statusText);
+  return data;
+}
+function setBusy(on, text) {
+  state.busy = on;
+  $("#busy").classList.toggle("hidden", !on); $("#busy").classList.toggle("flex", on);
+  $("#busyText").textContent = text || "working";
+  document.querySelectorAll(".btn").forEach((b) => { if (b.id !== "daemonBtn") b.disabled = on; b.classList.toggle("opacity-50", on && b.id !== "daemonBtn"); });
+}
+async function run(label, fn) {
+  if (state.busy) return;
+  setBusy(true, label);
+  try { await fn(); } catch (e) { toastNote(`${label} failed: ${e.message}`, "error"); } finally { setBusy(false); }
+}
+function toastNote(msg, kind) {
+  const el = document.createElement("div");
+  el.className = `text-[11px] rounded px-2 py-1 border ${kind === "error" ? "border-red-800 bg-red-950/50 text-red-300" : "border-amber-800/60 bg-amber-950/30 text-amber-300"}`;
+  el.textContent = msg;
+  $("#notes").prepend(el);
+  setTimeout(() => el.remove(), 12000);
+}
+const repo = () => $("#repo").value.trim();
+
+// ---------- Rendering: KPIs, notes ----------
+function renderResult(res) {
+  if (!res || !res.kpis) return;
+  state.result = res; state.view = "repo";
+  $("#kTotal").textContent = res.kpis.total_components;
+  $("#kRaw").textContent = res.kpis.raw_scanner_alerts;
+  $("#kCrit").textContent = res.kpis.actionable_critical;
+  $("#kNoise").textContent = res.kpis.downgraded_noise;
+  $("#kSrc").textContent = `sbom=${res.sbom_source} · advisories=${res.vuln_source}`;
+  const notes = $("#notes"); notes.querySelectorAll(".scan-note").forEach((n) => n.remove());
+  (res.notes || []).forEach((n) => {
+    const el = document.createElement("div");
+    el.className = "scan-note text-[11px] rounded px-2 py-1 border border-ink-600 bg-ink-850 text-slate-400";
+    el.textContent = "note: " + n; notes.appendChild(el);
+  });
+  $("#graphMode").textContent = "repository"; $("#backToRepo").classList.add("hidden");
+  $("#viewToggle").classList.remove("opacity-40", "pointer-events-none");
+  drawCurrent(); setCards(res.cards);
+}
+function drawCurrent() {
+  if (!state.result) return;
+  const deps = state.graphKind === "deps";
+  renderGraph(deps ? state.result.dependency_graph : state.result.graph, deps ? "deps" : "attack");
+}
+function setGraphKind(kind) {
+  if (state.view === "sim") return;
+  state.graphKind = kind;
+  document.querySelectorAll(".view-btn").forEach((b) => {
+    const on = b.dataset.view === kind;
+    b.classList.toggle("bg-ink-700", on); b.classList.toggle("text-slate-100", on); b.classList.toggle("text-slate-400", !on);
+  });
+  $("#legendAttack").classList.toggle("hidden", kind === "deps"); $("#legendAttack").classList.toggle("flex", kind !== "deps");
+  $("#legendDeps").classList.toggle("hidden", kind !== "deps"); $("#legendDeps").classList.toggle("flex", kind === "deps");
+  clearFocus(); drawCurrent();
+}
+document.querySelectorAll(".view-btn").forEach((b) => (b.onclick = () => setGraphKind(b.dataset.view)));
+$("#findForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const q = $("#findNode").value.trim().toLowerCase();
+  if (!q || !state.cy) return;
+  const hit = state.cy.nodes().filter((n) => n.data("raw").label.toLowerCase().includes(q) || n.id().toLowerCase().includes(q));
+  if (!hit.length) { toastNote(`no node matching "${$("#findNode").value.trim()}" in this view`); return; }
+  focusNode(hit[0]); state.cy.animate({ center: { eles: hit[0] }, zoom: Math.max(state.cy.zoom(), 1.1) }, { duration: 300 });
+});
+
+// ---------- Graph ----------
+const TIER_STYLE = {
+  EXPOSURE: { shape: "round-rectangle", color: "#0ea5e9" },
+  INTERNAL_MODULE: { shape: "round-rectangle", color: "#8b5cf6" },
+  DIRECT_PKG: { shape: "ellipse", color: "#94a3b8" },
+  TRANSITIVE_PKG: { shape: "ellipse", color: "#64748b" },
+  THREAT_LEAF: { shape: "diamond", color: "#ef4444" },
+};
+function renderGraph(graph, kind = "attack") {
+  const nodes = (graph && graph.nodes) || [];
+  const deps = kind === "deps";
+  $("#graphEmpty").classList.toggle("hidden", nodes.length > 0);
+  if (deps) $("#depCount").textContent = `${Math.max(nodes.length - 1, 0)} packages · ${((graph && graph.edges) || []).length} links`;
+  if (state.cy) state.cy.destroy();
+  const crowded = nodes.length > 150;
+  const els = [];
+  nodes.forEach((n) => {
+    const t = TIER_STYLE[n.tier] || TIER_STYLE.DIRECT_PKG;
+    const sev = n.severity ? SEV[n.severity] : null;
+    const a = n.attrs || {};
+    let color = t.color, shape = t.shape, size = n.tier === "THREAT_LEAF" ? 26 : 22, border = "#0b0f16", bw = 1, bstyle = "solid";
+    if (deps) {
+      if (a.root) { color = "#0ea5e9"; shape = "round-rectangle"; size = 32; }
+      else { shape = "ellipse"; color = n.tier === "DIRECT_PKG" ? "#cbd5e1" : "#64748b"; size = n.tier === "DIRECT_PKG" ? 18 : 11; }
+      if (sev) { color = n.severity === "LOW" ? "#10b981" : sev.node; size += 4; }
+      if (a.dev) { border = "#fbbf24"; bw = 2; bstyle = "dashed"; }
+    } else {
+      if (n.tier === "THREAT_LEAF") color = sev ? sev.node : "#ef4444";
+      else if ((n.tier === "DIRECT_PKG" || n.tier === "TRANSITIVE_PKG") && sev) color = n.severity === "LOW" ? "#10b981" : sev.node;
+      if (a.public) { border = "#f43f5e"; bw = 3; }
+    }
+    const badge = n.risk_elo != null ? `\n⟨Elo ${n.risk_elo}⟩` : "";
+    const showLabel = !deps || !crowded || a.root || n.tier === "DIRECT_PKG" || sev;
+    els.push({ data: { id: n.id, label: showLabel ? n.label + badge : "", color, shape, size, tier: n.tier, raw: n, border, bw, bstyle } });
+  });
+  ((graph && graph.edges) || []).forEach((e, i) => els.push({ data: { id: "e" + i, source: e.source, target: e.target,
+    label: e.relation, ev: e.evidence } }));
+  state.cy = cytoscape({
+    container: $("#cy"), elements: els, wheelSensitivity: 0.25, minZoom: 0.15, maxZoom: 2.5,
+    style: [
+      { selector: "node", style: { "background-color": "data(color)", shape: "data(shape)", label: "data(label)",
+        color: "#e2e8f0", "font-size": 8, "font-family": "ui-monospace, Consolas, monospace", "text-wrap": "wrap", "text-max-width": 130,
+        "text-valign": "bottom", "text-margin-y": 4, width: "data(size)", height: "data(size)", "border-width": "data(bw)",
+        "border-color": "data(border)", "border-style": "data(bstyle)",
+        "text-background-color": "#07090d", "text-background-opacity": 0.75, "text-background-padding": 2 } },
+      { selector: "node[label = '']", style: { "text-background-opacity": 0 } },
+      { selector: "edge", style: { width: 1.2, "line-color": "#334155", "target-arrow-color": "#334155", "target-arrow-shape": "triangle",
+        "curve-style": "bezier", "arrow-scale": 0.7 } },
+      { selector: ".dim", style: { opacity: 0.12 } },
+      { selector: "edge.hl", style: { "line-color": "#f43f5e", "target-arrow-color": "#f43f5e", width: 2.5, label: "data(label)",
+        "font-size": 7, color: "#fda4af", "text-rotation": "autorotate", "text-background-color": "#07090d", "text-background-opacity": 0.8 } },
+      { selector: "node.hl", style: { "border-color": "#fde68a", "border-width": 3 } },
+    ],
+    layout: deps && nodes.length > 300
+      ? { name: "concentric", padding: 20, minNodeSpacing: 4, concentric: (n) => 20 - n.data("raw").depth, levelWidth: () => 1 }
+      : { name: "breadthfirst", directed: true, spacingFactor: deps ? 0.9 : 1.05, padding: 20,
+          roots: nodes.filter((n) => n.tier === "EXPOSURE").map((n) => "#" + CSS.escape(n.id)) },
+  });
+  state.cy.on("tap", "node", (evt) => focusNode(evt.target));
+  state.cy.on("tap", (evt) => { if (evt.target === state.cy) clearFocus(); });
+}
+function focusNode(node) {
+  const cy = state.cy;
+  const path = node.predecessors().union(node.successors()).union(node);
+  cy.elements().addClass("dim").removeClass("hl");
+  path.removeClass("dim").addClass("hl");
+  const n = node.data("raw");
+  const info = $("#nodeInfo");
+  info.classList.remove("hidden");
+  const a = n.attrs || {};
+  const pub = a.public_evidence ? `<div class="text-rose-300">public: ${esc(a.public_evidence.file)}:${esc(a.public_evidence.line)} ${esc(a.public_evidence.detail)}</div>` : "";
+  let depInfo = "";
+  if (state.graphKind === "deps" && state.view !== "sim") {
+    depInfo = a.root ? `<div>${esc(a.components)} discovered components</div>` :
+      `<div>${n.tier === "DIRECT_PKG" ? "direct" : "transitive"}${a.dev ? " · dev-only" : ""} · version from ${esc(a.version_source)}</div>
+       <div>depends on ${esc(a.dependencies)} · used by ${esc(a.dependents)}${(n.finding_ids || []).length ? ` · <span class="text-red-300">${n.finding_ids.length} finding(s)</span>` : " · no findings"}</div>
+       ${(a.occurrences || []).length ? `<div class="text-slate-500">seen at ${a.occurrences.map(esc).join(", ")}</div>` : ""}`;
+  }
+  info.innerHTML = `<div class="text-slate-100">${esc(n.label.replace(/\n/g, " "))}</div><div class="text-slate-500">${esc(n.tier)}${n.file ? " · " + esc(n.file) + (n.line ? ":" + esc(n.line) : "") : ""}${n.risk_elo != null ? " · Elo " + esc(n.risk_elo) : ""}</div>${pub}${depInfo}`;
+  state.filter = { id: n.id, findings: new Set(n.finding_ids || []) };
+  $("#filterBar").classList.remove("hidden"); $("#filterNode").textContent = n.id;
+  renderCards(); showTab("cards");
+}
+function clearFocus() {
+  if (state.cy) state.cy.elements().removeClass("dim hl");
+  $("#nodeInfo").classList.add("hidden");
+  state.filter = null; $("#filterBar").classList.add("hidden"); renderCards();
+}
+$("#clearFilter").onclick = clearFocus;
+$("#fitBtn").onclick = () => state.cy && state.cy.fit(undefined, 20);
+$("#backToRepo").onclick = () => state.result && renderResult(state.result);
+
+// ---------- Evidence cards ----------
+function setCards(cards) {
+  const order = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+  state.cards = (cards || []).slice().sort((a, b) => b.risk.total - a.risk.total || order[a.finding.severity] - order[b.finding.severity]);
+  state.filter = null; $("#filterBar").classList.add("hidden");
+  renderCards();
+}
+function langFor(file) {
+  if (/\.(ts|tsx)$/.test(file)) return "typescript";
+  if (/\.(js|mjs|cjs)$/.test(file)) return "javascript";
+  if (/\.json$/.test(file)) return "json";
+  if (/\.ya?ml$/.test(file)) return "yaml";
+  if (/Dockerfile/i.test(file)) return "dockerfile";
+  return "plaintext";
+}
+function highlighted(code, file) {
+  try { if (window.hljs) return hljs.highlight(code, { language: langFor(file), ignoreIllegals: true }).value; } catch (e) { /* fall through */ }
+  return esc(code);
+}
+function cardHtml(c, open) {
+  const s = SEV[c.finding.severity] || SEV.LOW;
+  const v = c.validation || {};
+  const checks = Object.entries(v.checks || {}).map(([k, ok]) => `<span class="${ok ? "text-emerald-400" : "text-red-400"}">${ok ? "✓" : "✗"} ${esc(k)}</span>`).join(" ");
+  const deltas = (c.risk.deltas || []).map((d) => `<tr><td class="pr-3 text-right font-mono ${d.value >= 0 ? "text-red-300" : "text-emerald-300"}">${d.value >= 0 ? "+" : ""}${esc(d.value)}</td><td>${esc(d.label)}</td></tr>`).join("");
+  const hops = (c.attack_path.hops || []).map((h) => `<li class="font-mono text-[10.5px] text-slate-300 break-all">${esc(h)}</li>`).join("");
+  const refs = (c.remediation.references || []).map((r) => /^https?:\/\//.test(r) ? `<a class="underline text-sky-400 break-all" href="${esc(r)}" target="_blank" rel="noopener noreferrer">${esc(r)}</a>` : esc(r)).join("<br>");
+  return `<details class="rounded-md border ${s.border} bg-ink-850" ${open ? "open" : ""}>
+    <summary class="px-3 py-2 flex items-start gap-2">
+      <span class="font-mono text-[10px] mt-0.5 text-slate-500">${esc(c.finding.finding_id)}</span>
+      <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded ${s.bg} ${s.text}">${esc(c.finding.severity)}</span>
+      <span class="font-mono text-[11px] ${s.text}">Elo ${esc(c.risk.total)}</span>
+      <span class="text-xs text-slate-200 flex-1">${esc(c.finding.title)}</span>
+      <span class="text-[10px] ${v.passed ? "text-emerald-400" : "text-red-400"}" title="Post-Check Validator">${v.passed ? "✓ verified" : "✗ unverified"}</span>
+    </summary>
+    <div class="px-3 pb-3 space-y-3 text-xs">
+      <div><div class="text-[10px] uppercase tracking-widest text-slate-500">1 · Finding</div>
+        <div class="font-mono text-[11px] break-all">${esc(c.finding.purl || "n/a")}</div>
+        <div class="text-slate-400">${(c.finding.advisory_ids || []).slice(0, 4).map(esc).join(" · ")}</div></div>
+      <div><div class="text-[10px] uppercase tracking-widest text-slate-500">2 · Location <span class="normal-case font-mono text-slate-400">${esc(c.location.local_file)}:${esc(c.location.local_line)}</span></div>
+        <pre class="mt-1 rounded bg-ink-950 border border-ink-700 p-2 overflow-x-auto scroll-thin text-[10.5px] leading-4"><code class="hljs">${highlighted(c.location.code_snippet || "", c.location.local_file)}</code></pre></div>
+      <div><div class="text-[10px] uppercase tracking-widest text-slate-500">3 · Attack path <span class="normal-case text-slate-400">(call-chain depth ${esc(c.attack_path.call_chain_depth ?? "n/a")})</span></div>
+        <ol class="mt-1 space-y-0.5 list-decimal list-inside">${hops || '<li class="text-slate-500">direct leaf</li>'}</ol></div>
+      <div><div class="text-[10px] uppercase tracking-widest text-slate-500">4 · Risk Elo (locked formula)</div>
+        <table class="mt-1 text-[11px]"><tr><td class="pr-3 text-right font-mono text-slate-200">${esc(c.risk.base)}</td><td>base: ${esc(c.risk.base_reason)}</td></tr>${deltas}
+        <tr class="border-t border-ink-600"><td class="pr-3 text-right font-mono font-semibold ${s.text}">${esc(c.risk.total)}</td><td class="font-semibold ${s.text}">${esc(c.risk.severity)}</td></tr></table></div>
+      <div><div class="text-[10px] uppercase tracking-widest text-slate-500">5 · Remediation</div>
+        <div class="text-slate-300">${esc(c.remediation.summary)}</div>
+        <div class="mt-1 flex items-stretch gap-1"><code class="flex-1 rounded bg-ink-950 border border-ink-700 px-2 py-1 font-mono text-[11px] text-emerald-300 break-all">${esc(c.remediation.fix_command)}</code>
+        <button class="copy rounded border border-ink-600 bg-ink-700 hover:bg-ink-600 px-2 text-[10px]" data-copy="${esc(c.remediation.fix_command)}">copy</button></div>
+        ${refs ? `<div class="mt-1 text-[10px]">${refs}</div>` : ""}</div>
+      <div class="text-slate-400 italic">${esc(c.narrative)}</div>
+      <div class="text-[10px] flex flex-wrap gap-x-2 gap-y-0.5 border-t border-ink-700 pt-2"><span class="text-slate-500">validator (${esc(c.author)}${v.fell_back_to_deterministic ? ", fallback" : ""}${v.retries ? ", retries " + esc(v.retries) : ""}):</span> ${checks}</div>
+    </div></details>`;
+}
+function renderCards() {
+  let cards = state.cards;
+  if (state.filter) cards = cards.filter((c) => state.filter.findings.has(c.finding.finding_id));
+  $("#cardCount").textContent = state.cards.length ? `(${state.cards.length})` : "";
+  $("#cards").innerHTML = cards.length ? cards.slice(0, 150).map((c, i) => cardHtml(c, i === 0 && !!state.filter)).join("")
+    : '<p class="text-xs text-slate-500">No cards for this selection.</p>';
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".copy"); if (!b) return;
+  navigator.clipboard.writeText(b.dataset.copy).then(() => { b.textContent = "copied"; setTimeout(() => (b.textContent = "copy"), 1200); });
+});
+
+// ---------- Extra panels (gate / replay / simulation) ----------
+function gatePanel(adm) {
+  const blocked = adm.decision === "BLOCKED";
+  const sig = (adm.signals || []).map((s) => `<li class="${s.triggered ? (s.hard_block ? "text-red-300" : "text-amber-300") : "text-slate-500"}">${s.triggered ? (s.hard_block ? "✗" : "!") : "✓"} <b>${esc(s.name)}</b> ${esc(s.detail)}</li>`).join("");
+  return `<div class="rounded-md border ${blocked ? "border-red-700 bg-red-950/30" : "border-emerald-800 bg-emerald-950/20"} p-3 text-xs">
+    <div class="flex items-center gap-2"><span class="text-sm font-bold ${blocked ? "text-red-400" : "text-emerald-400"}">${esc(adm.decision)}</span>
+    <span class="font-mono">${esc(adm.package)}@${esc(adm.version || "latest")}</span><span class="text-slate-500">metadata: ${esc(adm.metadata_source)}</span></div>
+    <ul class="mt-2 space-y-0.5 text-[11px]">${sig}</ul>${(adm.errors || []).map((e) => `<div class="text-[10px] text-slate-500">${esc(e)}</div>`).join("")}</div>`;
+}
+function replayPanel(rep) {
+  const rows = (rep.commits || []).map((c) => `<tr class="border-t border-ink-700"><td class="font-mono pr-2 text-slate-400">${esc(c.sha.slice(0, 8))}</td>
+    <td class="pr-2">${esc(c.subject)}</td><td class="font-mono pr-2">+${c.added.length} -${c.removed.length} ~${c.changed.length}</td>
+    <td class="pr-2 ${c.anomalies.length ? "text-amber-300" : "text-slate-500"}">${c.anomalies.length} anomalies</td>
+    <td>${c.admissions.map((a) => `<span class="${a.decision === "BLOCKED" ? "text-red-400" : "text-emerald-400"}">${esc(a.package)}:${esc(a.decision)}</span>`).join(" ") || (c.triaged ? "triaged" : '<span class="text-slate-600">skipped</span>')}</td></tr>`).join("");
+  return `<div class="rounded-md border border-ink-600 bg-ink-850 p-3 text-[11px]"><div class="font-semibold text-slate-200 mb-1">Commit replay (read-only, git show)</div>
+    <table class="w-full">${rows || '<tr><td class="text-slate-500">no commits</td></tr>'}</table>${(rep.notes || []).map((n) => `<div class="text-amber-300">${esc(n)}</div>`).join("")}</div>`;
+}
+function simPanel(sim) {
+  return `<div class="rounded-md border ${sim.blocked ? "border-red-700 bg-red-950/40" : "border-amber-700 bg-amber-950/30"} p-3 text-xs">
+    <div class="text-sm font-bold ${sim.blocked ? "text-red-400" : "text-amber-300"}">${sim.blocked ? "ATTACK INTERCEPTED & BLOCKED" : "ATTACK NOT FULLY BLOCKED"} · max Elo ${esc(sim.max_elo)}</div>
+    <ul class="mt-1 list-disc list-inside text-[11px] text-slate-300">${sim.injected.map((i) => `<li class="break-all">${esc(i)}</li>`).join("")}</ul>
+    <div class="mt-2 text-[10px] text-slate-500">${sim.safety_notes.map(esc).join("<br>")}</div></div>`;
+}
+const setExtra = (html) => ($("#extraPanel").innerHTML = html ? `<div class="mb-2">${html}</div>` : "");
+
+// ---------- Actions ----------
+document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => {
+  const act = b.dataset.act;
+  if (act === "scan") run("Full scan", async () => { setExtra(""); renderResult(await api("/api/scan", { repo: repo() })); showTab("cards"); });
+  if (act === "replay") run("Replay 5 commits", async () => { const d = await api("/api/replay", { repo: repo(), commits: 5 }); renderResult(d.result); setExtra(replayPanel(d.replay)); showTab("cards"); });
+  if (act === "simulate") run("Simulating attack", async () => {
+    const sim = await api("/api/simulate-attack", { repo: repo() });
+    if (!state.result) { try { const r = await api("/api/result"); if (r.kpis) state.result = r; } catch (e) { /* ignore */ } }
+    state.view = "sim"; renderGraph(sim.graph, "attack"); setCards(sim.cards); setExtra(simPanel(sim) + gatePanel(sim.admission));
+    $("#viewToggle").classList.add("opacity-40", "pointer-events-none");
+    $("#graphMode").textContent = "simulation sandbox"; $("#backToRepo").classList.remove("hidden"); showTab("cards");
+  });
+  if (act === "daemon") toggleDaemon();
+}));
+$("#gateForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const pkg = $("#pkg").value.trim(); if (!pkg) return;
+  run("Pre-install gate", async () => {
+    const d = await api("/api/check-pkg", { repo: repo(), pkg });
+    renderResult(d.result); setExtra(gatePanel(d.admission));
+    if (d.admission.card) { state.cards = [d.admission.card, ...state.cards.filter((c) => c.finding.finding_id !== d.admission.card.finding.finding_id)]; renderCards(); }
+    showTab("cards");
+  });
+});
+async function toggleDaemon() {
+  try { const st = await api("/api/daemon/toggle", { repo: repo(), interval: 30, demo_drift: $("#demoDrift").checked }); paintDaemon(st); }
+  catch (e) { toastNote("Drift watchdog: " + e.message, "error"); }
+}
+function paintDaemon(st) {
+  $("#daemonDot").className = `w-2 h-2 rounded-full ${st.running ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`;
+  $("#daemonBtn").title = st.running ? `running · ${st.polls} polls · ${st.known_advisories} advisories · new: ${(st.new_advisories || []).join(", ") || "none"}` : "stopped";
+}
+let lastPolls = -1;
+setInterval(async () => {
+  try {
+    const st = await api("/api/daemon/status"); paintDaemon(st);
+    if (st.running && st.polls !== lastPolls && state.view === "repo" && !state.busy) { lastPolls = st.polls; const r = await api("/api/result"); if (r.kpis) renderResult(r); }
+  } catch (e) { /* server restarting */ }
+}, 5000);
+
+// ---------- Tabs ----------
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("tab-active", t.dataset.tab === name));
+  document.querySelectorAll(".tabpane").forEach((p) => p.classList.toggle("hidden", p.id !== "tab-" + name));
+}
+document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => showTab(t.dataset.tab)));
+
+// ---------- Live stream (SSE) ----------
+const LVL = { tool: "text-cyan-300", warn: "text-amber-300", error: "text-red-400", success: "text-emerald-300", thought: "text-fuchsia-300 italic", info: "text-slate-300" };
+function connectStream() {
+  const es = new EventSource("/api/stream");
+  es.onopen = () => ($("#streamDot").className = "inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 align-middle");
+  es.onerror = () => ($("#streamDot").className = "inline-block w-1.5 h-1.5 rounded-full bg-red-500 align-middle");
+  es.onmessage = (m) => {
+    let ev; try { ev = JSON.parse(m.data); } catch (e) { return; }
+    const pane = $("#tab-stream");
+    const atBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 40;
+    const row = document.createElement("div");
+    row.className = "flex gap-2 hover:bg-ink-850 px-1 rounded";
+    const t = new Date(ev.ts).toLocaleTimeString([], { hour12: false });
+    row.innerHTML = `<span class="text-slate-600 shrink-0">${esc(t)}</span><span class="text-slate-500 shrink-0 w-28 truncate text-right">${esc(ev.source)}</span><span class="${LVL[ev.level] || LVL.info} break-words min-w-0">${esc(ev.message)}</span>`;
+    pane.appendChild(row);
+    while (pane.childElementCount > 800) pane.firstElementChild.remove();
+    if (atBottom) pane.scrollTop = pane.scrollHeight;
+  };
+}
+
+// ---------- Chat ----------
+function mdLite(s) {
+  return esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, '<code class="font-mono text-[11px] bg-ink-950 px-1 rounded">$1</code>')
+    .replace(/^- /gm, "• ").replace(/\n/g, "<br>");
+}
+function chatBubble(who, html) {
+  const el = document.createElement("div");
+  el.className = who === "you" ? "ml-8 rounded-md bg-ink-700 px-3 py-2 text-slate-100" : "mr-4 rounded-md bg-ink-850 border border-ink-700 px-3 py-2 text-slate-300";
+  el.innerHTML = html; $("#chatLog").appendChild(el); $("#chatLog").scrollTop = $("#chatLog").scrollHeight; return el;
+}
+$("#chatForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const q = $("#chatInput").value.trim(); if (!q) return;
+  $("#chatInput").value = ""; chatBubble("you", esc(q));
+  const pending = chatBubble("bot", '<span class="text-slate-500">thinking…</span>');
+  try {
+    const r = await api("/api/chat", { session_id: "dashboard", message: q });
+    pending.innerHTML = mdLite(r.answer) + `<div class="mt-1 text-[10px] text-slate-500">${esc(r.author)}${r.referenced_findings.length ? " · cites " + r.referenced_findings.map(esc).join(", ") : ""}</div>`;
+  } catch (err) { pending.innerHTML = `<span class="text-red-400">${esc(err.message)}</span>`; }
+});
+
+// ---------- Boot ----------
+(async () => {
+  connectStream();
+  try {
+    const cfg = await api("/api/config");
+    $("#repo").value = cfg.default_repo;
+    $("#llmBadge").textContent = cfg.llm_provider === "none" ? "LLM: off (deterministic)" : `LLM: ${cfg.llm_provider} · ${cfg.llm_model} · t=0.0`;
+    if (cfg.offline) toastNote("offline mode: demo advisories, no registry lookups");
+    const r = await api("/api/result"); if (r && r.kpis) renderResult(r);
+  } catch (e) { toastNote("server unreachable: " + e.message, "error"); }
+})();
+</script>
+</body>
+</html>
